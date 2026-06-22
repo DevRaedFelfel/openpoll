@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="styles.css?v=3" />
+<link rel="stylesheet" href="styles.css?v=4" />
 <script src="qrcode-generator.js"></script>
 </head>
 <body>
@@ -111,13 +111,49 @@ function renderQR(entering) {
     const qr = qrcode(0, "M");
     qr.addData(url);
     qr.make();
-    document.getElementById("qr").innerHTML =
-      qr.createSvgTag({ cellSize: 8, margin: 16, scalable: true });
+    const qrEl = document.getElementById("qr");
+    qrEl.innerHTML = qr.createSvgTag({ cellSize: 8, margin: 16, scalable: true });
+    // click the QR to blow it up fullscreen so the back row can scan it
+    const svgHtml = qrEl.innerHTML;
+    const shown = url.replace(/^https?:\/\//, "");
+    qrEl.classList.add("clickable");
+    qrEl.setAttribute("role", "button");
+    qrEl.setAttribute("tabindex", "0");
+    qrEl.setAttribute("aria-label", "Enlarge QR code");
+    qrEl.addEventListener("click", () => openQrModal(svgHtml, shown));
+    qrEl.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openQrModal(svgHtml, shown); }
+    });
   } catch (e) {
     console.error("QR render failed:", e);
     document.getElementById("qr").textContent = "QR unavailable — share the link below.";
   }
 }
+
+/* ---------- fullscreen QR lightbox (presenter convenience) ---------- */
+let qrModal = null;
+function ensureQrModal() {
+  if (qrModal) return qrModal;
+  qrModal = document.createElement("div");
+  qrModal.className = "qr-modal";
+  qrModal.innerHTML =
+    `<div class="qr-modal-inner">
+       <div class="qr-modal-qr"></div>
+       <div class="qr-modal-url mono"></div>
+       <div class="qr-modal-hint">Tap anywhere to close</div>
+     </div>`;
+  qrModal.addEventListener("click", closeQrModal);
+  document.body.appendChild(qrModal);
+  return qrModal;
+}
+function openQrModal(svgHtml, url) {
+  const m = ensureQrModal();
+  m.querySelector(".qr-modal-qr").innerHTML = svgHtml;
+  m.querySelector(".qr-modal-url").textContent = url;
+  m.classList.add("show");
+}
+function closeQrModal() { if (qrModal) qrModal.classList.remove("show"); }
+addEventListener("keydown", (e) => { if (e.key === "Escape") closeQrModal(); });
 
 function renderLive() {
   const tally = cellTally(responses);
