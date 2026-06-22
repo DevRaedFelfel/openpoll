@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>OpenPoll — present</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css" />
+<script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.4/build/qrcode.min.js"></script>
+</head>
+<body>
+<div class="wrap">
+  <div class="bar">
+    <div>
+      <div class="eyebrow">OpenPoll</div>
+      <h1 class="display" id="title" style="margin:2px 0 0;">…</h1>
+    </div>
+    <div class="counter"><span id="phase">Join</span></div>
+  </div>
+
+  <div id="stage" class="stage"></div>
+
+  <div class="nav">
+    <button class="ghost" id="prev">← Back</button>
+    <button id="next">Next →</button>
+  </div>
+</div>
+
+<script type="module">
+import { db } from "./firebase.js";
+import { buildGrid } from "./grid.js";
+import {
+  doc, getDoc, collection, onSnapshot
+} from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+
+const qid = new URLSearchParams(location.search).get("q");
+const VIEWS = ["qr", "live", "result"];
+const PHASE = { qr: "Join", live: "Solving", result: "Solution" };
+let view = VIEWS.includes(new URLSearchParams(location.search).get("view")) ?
+  new URLSearchParams(location.search).get("view") : "qr";
+
+const stage = document.getElementById("stage");
+const titleEl = document.getElementById("title");
+const phaseEl = document.getElementById("phase");
+
+let question = null;
+let joins = 0;
+let responses = [];
+
+if (!qid) { stage.innerHTML = `<p class="sub">No question id in the link.</p>`; }
+
+(async function init() {
+  if (!qid) return;
+  const snap = await getDoc(doc(db, "questions", qid));
+  if (!snap.exists()) { stage.innerHTML = `<p class="sub">That question doesn't exist.</p>`; return; }
+  question = snap.data();
+  titleEl.textContent = question.title || "Question";
+
+  onSnapshot(collection(db, "questions", qid, "joins"), (s) => { joins = s.size; render(); });
+  onSnapshot(collection(db, "questions", qid, "responses"), (s) => {
+    responses = s.docs.map((d) => d.data());
+    render();
+  });
+  render();
+})();
+
+document.getElementById("next").addEventListener("click", () => step(1));
+document.getElementById("prev").addEventListener("click", () => step(-1));
+addEventListener("keydown", (e) => {
+  if (e.key === "ArrowRight") step(1);
+  if (e.key === "ArrowLeft") step(-1);
+});
+function step(d) {
+  const i = VIEWS.indexOf(view);
+  view = VIEWS[Math.min(VIEWS.length - 1, Math.max(0, i + d))];
+  render();
+}
+
+function render() {
+  if (!question) return;
+  phaseEl.textContent = PHASE[view];
+  if (view === "qr") return renderQR();
+  if (view === "live") return renderLive();
+  return renderResult();
+}
+
+function renderQR() {
+  const url = new URL("play.html?q=" + qid, location.href).href;
+  stage.innerHTML = `
+    <div class="qr-stage">
+      <div id="qr"></div>
+      <div>
+        <p class="eyebrow" style="color:var(--muted)">Scan to join</p>
+        <p class="joinurl mono"><a href="${url}">${url.replace(/^https?:\/\//, "")}</a></p>
+        <div class="bigjoin" style="text-align:left; margin-top:18px;">
+          <div class="num display">${joins}</div>
+          <div class="lbl">joined</div>
+        </div>
+      </div>
+    </div>`;
+  const c = document.createElement("canvas");
+  document.getElementById("qr").appendChild(c);
+  if (window.QRCode) QRCode.toCanvas(c, url, { width: 300, margin: 1 });
+}
+
+function renderLive() {
+  const tally = cellTally();
+  const txt = stmtText();
+  const { wrapper, cells } = buildGrid(question.rows || [], question.cols || []);
+  for (const [cellId, el] of Object.entries(cells)) {
+    const counts = tally[cellId] || {};
+    const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+    if (!sorted.length) { el.innerHTML = `<span class="sub" style="margin:0">—</span>`; continue; }
+    sorted.forEach(([sid, n], i) => {
+      const row = document.createElement("div");
+      row.className = "tally" + (i === 0 ? " top" : "");
+      row.innerHTML = `<span>${escapeHtml(txt[sid] || sid)}</span><span class="n mono">${n}</span>`;
+      el.appendChild(row);
+    });
+  }
+  stage.innerHTML = "";
+  stage.appendChild(banner(`${joins} joined · ${responses.length} submitted · live`, "live"));
+  stage.appendChild(wrapper);
+}
+
+function renderResult() {
+  const tally = cellTally();
+  const txt = stmtText();
+  const total = responses.length || 1;
+  // reverse the correct map: cellId -> [statementId]
+  const correctByCell = {};
+  for (const [sid, cid] of Object.entries(question.correct || {})) {
+    (correctByCell[cid] = correctByCell[cid] || []).push(sid);
+  }
+  const { wrapper, cells } = buildGrid(question.rows || [], question.cols || []);
+  for (const [cellId, el] of Object.entries(cells)) {
+    const correctIds = correctByCell[cellId] || [];
+    const counts = tally[cellId] || {};
+    // accuracy = avg over this cell's correct statements of (placed-here / total)
+    let acc = 0;
+    if (correctIds.length) {
+      acc = correctIds.reduce((s, sid) => s + ((counts[sid] || 0) / total), 0) / correctIds.length;
+    }
+    const pct = Math.round(acc * 100);
+    el.classList.add(pct >= 75 ? "good" : pct >= 45 ? "mid" : "bad");
+
+    const ans = document.createElement("div");
+    ans.className = "answer";
+    ans.textContent = correctIds.map((s) => txt[s] || s).join(", ") || "—";
+    el.appendChild(ans);
+
+    if (responses.length) {
+      const p = document.createElement("div");
+      p.className = "pct mono";
+      p.textContent = pct + "% correct";
+      el.appendChild(p);
+
+      // most common wrong statement landing in this cell
+      const wrong = Object.entries(counts)
+        .filter(([sid]) => !correctIds.includes(sid))
+        .sort((a, b) => b[1] - a[1])[0];
+      if (wrong) {
+        const m = document.createElement("div");
+        m.className = "miss";
+        m.textContent = "missed → " + (txt[wrong[0]] || wrong[0]);
+        el.appendChild(m);
+      }
+    }
+  }
+  stage.innerHTML = "";
+  stage.appendChild(banner(`Solution · based on ${responses.length} answers`, "result"));
+  stage.appendChild(wrapper);
+}
+
+function banner(text, kind) {
+  const d = document.createElement("div");
+  d.className = "bar";
+  d.innerHTML = `<div class="counter"><span class="big mono">${text}</span></div>`;
+  return d;
+}
+
+// cellId -> { statementId: count }
+function cellTally() {
+  const t = {};
+  for (const r of responses) {
+    const a = r.answers || {};
+    for (const [sid, cid] of Object.entries(a)) {
+      (t[cid] = t[cid] || {});
+      t[cid][sid] = (t[cid][sid] || 0) + 1;
+    }
+  }
+  return t;
+}
+function stmtText() {
+  const m = {};
+  (question.statements || []).forEach((s) => (m[s.id] = s.text));
+  return m;
+}
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>OpenPoll — questions</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+<div class="wrap">
+  <div class="eyebrow">OpenPoll</div>
+  <h1 class="display">Questions</h1>
+  <p class="sub">Pick a question to present, or open its audience link. Live results stream from Firestore.</p>
+
+  <div id="list" class="qlist"><div class="empty">Loading…</div></div>
+
+  <div style="margin-top:24px; display:flex; gap:10px; flex-wrap:wrap;">
+    <button id="seed">Add sample question</button>
+    <span id="msg" class="sub" style="margin:0; align-self:center;"></span>
+  </div>
+</div>
+
+<script type="module">
+import { db } from "./firebase.js";
+import {
+  collection, onSnapshot, addDoc, serverTimestamp, query, orderBy
+} from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+
+const list = document.getElementById("list");
+const msg = document.getElementById("msg");
+
+onSnapshot(query(collection(db, "questions"), orderBy("createdAt", "desc")), (snap) => {
+  if (snap.empty) {
+    list.innerHTML = `<div class="empty">No questions yet. Add the sample below to try the full flow.</div>`;
+    return;
+  }
+  list.innerHTML = "";
+  snap.forEach((d) => {
+    const q = d.data();
+    const row = document.createElement("div");
+    row.className = "qrow";
+    row.innerHTML = `
+      <div class="meta">
+        <h3>${escapeHtml(q.title || "Untitled")}</h3>
+        <div class="id mono">${d.id}</div>
+      </div>
+      <div class="actions">
+        <a href="present.html?q=${d.id}"><button>Present</button></a>
+        <a href="play.html?q=${d.id}" target="_blank" rel="noopener"><button class="ghost">Audience view</button></a>
+      </div>`;
+    list.appendChild(row);
+  });
+});
+
+document.getElementById("seed").addEventListener("click", async () => {
+  msg.textContent = "Adding…";
+  try {
+    const ref = await addDoc(collection(db, "questions"), sampleQuestion());
+    msg.textContent = "Added " + ref.id;
+  } catch (e) {
+    msg.textContent = "Failed: " + e.message;
+  }
+});
+
+function sampleQuestion() {
+  return {
+    title: "Stacks vs Queues",
+    rows: [{ id: "principle", label: "Principle" }, { id: "operations", label: "Operations" }],
+    cols: [{ id: "stack", label: "Stack" }, { id: "queue", label: "Queue" }],
+    statements: [
+      { id: "lifo", text: "LIFO" },
+      { id: "fifo", text: "FIFO" },
+      { id: "pushpop", text: "push / pop" },
+      { id: "enqdeq", text: "enqueue / dequeue" }
+    ],
+    correct: {
+      lifo: "principle__stack",
+      fifo: "principle__queue",
+      pushpop: "operations__stack",
+      enqdeq: "operations__queue"
+    },
+    createdAt: serverTimestamp()
+  };
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+</script>
+</body>
+</html>

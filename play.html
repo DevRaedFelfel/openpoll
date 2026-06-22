@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+<title>OpenPoll — answer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css" />
+<script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
+</head>
+<body>
+<div class="wrap">
+  <div class="eyebrow">OpenPoll</div>
+  <h1 class="display" id="title">…</h1>
+  <p class="sub">Drag each statement into the right place. One cell can hold more than one. Tap <b>Send answer</b> when done.</p>
+
+  <div id="bank" class="bank" aria-label="statements to place"></div>
+  <div style="height:18px"></div>
+  <div id="board"></div>
+
+  <div class="nav" style="justify-content:flex-start; margin-top:26px;">
+    <button id="send">Send answer</button>
+    <span id="state" class="sub" style="margin:0; align-self:center;"></span>
+  </div>
+</div>
+
+<script type="module">
+import { db } from "./firebase.js";
+import { buildGrid } from "./grid.js";
+import {
+  doc, getDoc, collection, addDoc, serverTimestamp
+} from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+
+const qid = new URLSearchParams(location.search).get("q");
+const titleEl = document.getElementById("title");
+const bank = document.getElementById("bank");
+const board = document.getElementById("board");
+const sendBtn = document.getElementById("send");
+const stateEl = document.getElementById("state");
+
+if (!qid) { fail("No question id in the link."); }
+
+let cells = {};
+
+(async function init() {
+  if (!qid) return;
+  let snap;
+  try { snap = await getDoc(doc(db, "questions", qid)); }
+  catch (e) { return fail("Could not load: " + e.message); }
+  if (!snap.exists()) return fail("That question doesn't exist.");
+
+  const q = snap.data();
+  titleEl.textContent = q.title || "Question";
+
+  // statements into the bank, shuffled
+  shuffle(q.statements.slice()).forEach((s) => bank.appendChild(chip(s)));
+
+  const built = buildGrid(q.rows || [], q.cols || []);
+  cells = built.cells;
+  board.appendChild(built.wrapper);
+
+  // make the bank and every cell mutually drag-droppable
+  makeSortable(bank);
+  Object.values(cells).forEach(makeSortable);
+
+  // count a join (best effort, non-blocking)
+  addDoc(collection(db, "questions", qid, "joins"), { at: serverTimestamp() }).catch(() => {});
+})();
+
+sendBtn.addEventListener("click", async () => {
+  const answers = {};
+  for (const [cellId, el] of Object.entries(cells)) {
+    el.querySelectorAll(".chip").forEach((c) => { answers[c.dataset.id] = cellId; });
+  }
+  if (Object.keys(answers).length === 0) {
+    stateEl.textContent = "Place at least one statement first.";
+    return;
+  }
+  sendBtn.disabled = true;
+  stateEl.textContent = "Sending…";
+  try {
+    await addDoc(collection(db, "questions", qid, "responses"),
+      { answers, at: serverTimestamp() });
+    lock();
+  } catch (e) {
+    sendBtn.disabled = false;
+    stateEl.innerHTML = `<span class="flash">Failed: ${e.message}</span>`;
+  }
+});
+
+function chip(s) {
+  const d = document.createElement("div");
+  d.className = "chip";
+  d.dataset.id = s.id;
+  d.textContent = s.text;
+  return d;
+}
+function makeSortable(el) {
+  Sortable.create(el, {
+    group: "pool", animation: 150, draggable: ".chip",
+    onAdd: clear, onRemove: clear,
+    onStart: () => el.classList.remove("over")
+  });
+}
+function clear() { document.querySelectorAll(".cell.over").forEach((c) => c.classList.remove("over")); }
+function lock() {
+  document.querySelectorAll(".chip").forEach((c) => (c.style.pointerEvents = "none"));
+  stateEl.textContent = "Answer sent — watch the screen.";
+}
+function shuffle(a) { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; }
+function fail(m) {
+  document.querySelector(".wrap").innerHTML =
+    `<div class="eyebrow">OpenPoll</div><h1 class="display">Hmm.</h1><p class="sub">${m}</p>`;
+}
+</script>
+</body>
+</html>
