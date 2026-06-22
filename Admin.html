@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>OpenPoll — admin</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+<div class="wrap">
+  <div class="eyebrow">OpenPoll</div>
+  <h1 class="display">Admin</h1>
+  <p class="sub">Reset the database, then load the real questions. Both actions hit Firestore directly.</p>
+
+  <div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:18px;">
+    <button id="reset" class="ghost">Reset — delete ALL questions, joins, responses</button>
+    <button id="load">Load real questions (Q1, Q2, Q3)</button>
+  </div>
+
+  <pre id="log" class="mono" style="background:#fff; border:1px solid var(--line); border-radius:var(--r); padding:14px; white-space:pre-wrap; min-height:120px; font-size:13px;"></pre>
+</div>
+
+<script type="module">
+import { db } from "./firebase.js";
+import {
+  collection, getDocs, doc, setDoc, deleteDoc, serverTimestamp
+} from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+
+const logEl = document.getElementById("log");
+const log = (m) => { logEl.textContent += m + "\n"; };
+
+document.getElementById("reset").addEventListener("click", async () => {
+  if (!confirm("Delete every question and all joins/responses? This cannot be undone.")) return;
+  logEl.textContent = "";
+  try {
+    const qs = await getDocs(collection(db, "questions"));
+    if (qs.empty) { log("Nothing to delete."); return; }
+    for (const qd of qs.docs) {
+      let n = 0;
+      for (const sub of ["joins", "responses"]) {
+        const s = await getDocs(collection(db, "questions", qd.id, sub));
+        await Promise.all(s.docs.map((d) => deleteDoc(doc(db, "questions", qd.id, sub, d.id))));
+        n += s.size;
+      }
+      await deleteDoc(doc(db, "questions", qd.id));
+      log(`deleted ${qd.id}  (+${n} sub-docs)`);
+    }
+    log("Reset complete.");
+  } catch (e) { log("ERROR: " + e.message); }
+});
+
+document.getElementById("load").addEventListener("click", async () => {
+  logEl.textContent = "";
+  try {
+    for (const [id, q] of Object.entries(QUESTIONS)) {
+      await setDoc(doc(db, "questions", id), { ...q, createdAt: serverTimestamp() });
+      log(`loaded "${q.title}"  ->  id: ${id}`);
+    }
+    log("\nDone. Open index.html and use Present / Audience view.");
+    log("Stable URLs:");
+    for (const id of Object.keys(QUESTIONS)) log(`  present.html?q=${id}   |   play.html?q=${id}`);
+  } catch (e) { log("ERROR: " + e.message); }
+});
+
+const QUESTIONS = {
+  sectors: {
+    title: "Education — links with other sectors",
+    type: "dragdrop",
+    rows: [{ id: "edu", label: "Education" }],
+    cols: [
+      { id: "wash", label: "WASH" },
+      { id: "shelter", label: "shelter" },
+      { id: "nutrition", label: "nutrition" },
+      { id: "cp", label: "Child protection/MHPSS" },
+      { id: "fsl", label: "FSL" },
+      { id: "health", label: "Health" }
+    ],
+    statements: [
+      { id: "wash_schools", text: "WASH facilities in schools" },
+      { id: "shelter_advice", text: "Technical advice from Shelter on physically safer temporary learning spaces" },
+      { id: "tls_design", text: "Consult on design and establishment of TLS" },
+      { id: "nutrition_sessions", text: "Provide nutrition education sessions for parents on optimal hygiene and care practices" },
+      { id: "nutrition_referral", text: "Train teachers on identification and case referral for nutrition services" },
+      { id: "pss_teachers", text: "Psychosocial support training for teachers" },
+      { id: "cp_awareness", text: "Identify/raise awareness of child protection" },
+      { id: "youth_skills", text: "Youth skills training for income generation" },
+      { id: "food_parcels", text: "Distribute food parcels within the shelters of the EiE intervention" },
+      { id: "edu_costs", text: "Support for costs associated with education" },
+      { id: "bcc_iec", text: "BCC/IEC materials to support health and hygiene promotion activities" },
+      { id: "vaccine", text: "Promote vaccine campaigns" },
+      { id: "public_health", text: "Public health promotion" },
+      { id: "first_aid", text: "Provide emergency first aid kits and first aid training to TLS" }
+    ],
+    correct: {
+      wash_schools: "edu__wash",
+      shelter_advice: "edu__shelter",
+      tls_design: "edu__shelter",
+      nutrition_sessions: "edu__nutrition",
+      nutrition_referral: "edu__nutrition",
+      pss_teachers: "edu__cp",
+      cp_awareness: "edu__cp",
+      youth_skills: "edu__fsl",
+      food_parcels: "edu__fsl",
+      edu_costs: "edu__fsl",
+      bcc_iec: "edu__health",
+      vaccine: "edu__health",
+      public_health: "edu__health",
+      first_aid: "edu__health"
+    }
+  },
+
+  nexus: {
+    title: "Triple Nexus in Gaza",
+    type: "dragdrop",
+    rows: [],
+    cols: [
+      { id: "hum", label: "Humanitarian" },
+      { id: "dev", label: "Development" },
+      { id: "peace", label: "Peace" }
+    ],
+    statements: [
+      { id: "h1", text: "Establish TLSs for displaced children." },
+      { id: "h2", text: "Provide learning materials and PSS support." },
+      { id: "h3", text: "Ensure safe access to learning during crisis." },
+      { id: "d1", text: "Strengthen teacher capacity and accreditation of learning." },
+      { id: "d2", text: "Develop pathways for certification and reintegration into formal education." },
+      { id: "d3", text: "Build local partner and ministry capacity." },
+      { id: "p1", text: "Promote social cohesion, resilience, and non-violent conflict resolution through SEL and life skills." },
+      { id: "p2", text: "Engage communities and children in inclusive participation and decision-making." },
+      { id: "p3", text: "Reduce protection risks and strengthen community trust around education services." }
+    ],
+    correct: {
+      h1: "hum", h2: "hum", h3: "hum",
+      d1: "dev", d2: "dev", d3: "dev",
+      p1: "peace", p2: "peace", p3: "peace"
+    }
+  },
+
+  phases: {
+    title: "EiE activities across DRR phases",
+    type: "matrix",
+    rows: [
+      { id: "a1", label: "Establish TLS if existing spaces are insufficient or unsafe (contamination, damage, destruction, distance or displacement)" },
+      { id: "a2", label: "Retrofit existing schools to build resilience to hazards (e.g. earthquakes, typhoon and/or flooding)" },
+      { id: "a3", label: "Establish accelerated education programmes to facilitate rapid catch up (including training teachers)" },
+      { id: "a4", label: "Establish school WASH and health facilities sufficient to protect children's health and promote healthy behaviours" },
+      { id: "a5", label: "Rehabilitate and (re)construct schools which were damaged, destroyed or closed during the emergency" },
+      { id: "a6", label: "Teach children how to swim in case of flooding" },
+      { id: "a7", label: "Officially recognize student learning and teacher development which took place during the emergency period" },
+      { id: "a8", label: "Conduct rapid joint education needs assessment" },
+      { id: "a9", label: "Integrate DRR and SEL content into formal curriculum to develop school and personal resilience" },
+      { id: "a10", label: "Stockpile/preposition education materials (school kits, teacher kits, ECD kits, textbooks, sport materials)" },
+      { id: "a11", label: "Develop parental ability to support their children's education at home and use positive discipline techniques" }
+    ],
+    cols: [
+      { id: "mitigation", label: "Mitigation (DRR)" },
+      { id: "preparedness", label: "Preparedness" },
+      { id: "response", label: "Response" },
+      { id: "recovery", label: "Recovery & reconstruction" }
+    ],
+    correctCells: [
+      "a1__response",
+      "a2__mitigation",
+      "a3__recovery",
+      "a4__mitigation", "a4__preparedness", "a4__response", "a4__recovery",
+      "a5__recovery",
+      "a6__mitigation",
+      "a7__recovery",
+      "a8__response",
+      "a9__mitigation",
+      "a10__preparedness",
+      "a11__mitigation", "a11__preparedness", "a11__response"
+    ]
+  }
+};
+</script>
+</body>
+</html>

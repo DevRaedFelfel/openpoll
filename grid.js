@@ -57,3 +57,42 @@ function headerCell(label, kind) {
   d.textContent = label;
   return d;
 }
+
+// Mobile-friendly drop layout for the audience: a vertical stack of
+// full-width, labelled drop zones. Same cellId keys as buildGrid.
+export function buildZones(rows, cols) {
+  const hasRows = rows && rows.length > 0;
+  const hasCols = cols && cols.length > 0;
+  const wrap = document.createElement("div");
+  wrap.className = "zones";
+  const cells = {};
+  const rowList = hasRows ? rows : [{ id: null, label: null }];
+  rowList.forEach((r) => {
+    const colList = hasCols ? cols : [{ id: null, label: null }];
+    colList.forEach((c) => {
+      const id = cellIdFor(r.id, c.id, hasRows, hasCols);
+      const zone = document.createElement("div");
+      zone.className = "zone";
+      const lab = document.createElement("div");
+      lab.className = "zlabel";
+      lab.textContent = zoneLabel(rows, cols, r, c, hasRows, hasCols);
+      const drop = document.createElement("div");
+      drop.className = "cell drop";
+      drop.dataset.cell = id;
+      zone.appendChild(lab);
+      zone.appendChild(drop);
+      wrap.appendChild(zone);
+      cells[id] = drop;
+    });
+  });
+  return { wrapper: wrap, cells };
+}
+
+function zoneLabel(rows, cols, r, c, hasRows, hasCols) {
+  if (hasRows && hasCols) {
+    if (rows.length === 1) return c.label;
+    if (cols.length === 1) return r.label;
+    return r.label + " · " + c.label;
+  }
+  return hasRows ? r.label : c.label;
+}

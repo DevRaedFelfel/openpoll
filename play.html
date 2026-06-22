@@ -14,13 +14,11 @@
 <div class="wrap">
   <div class="eyebrow">OpenPoll</div>
   <h1 class="display" id="title">…</h1>
-  <p class="sub">Drag each statement into the right place. One cell can hold more than one. Tap <b>Send answer</b> when done.</p>
+  <p class="sub" id="hint"></p>
 
-  <div id="bank" class="bank" aria-label="statements to place"></div>
-  <div style="height:18px"></div>
-  <div id="board"></div>
+  <div id="content"></div>
 
-  <div class="nav" style="justify-content:flex-start; margin-top:26px;">
+  <div class="nav" style="justify-content:flex-start; margin-top:24px;">
     <button id="send">Send answer</button>
     <span id="state" class="sub" style="margin:0; align-self:center;"></span>
   </div>
@@ -28,17 +26,18 @@
 
 <script type="module">
 import { db } from "./firebase.js";
-import { buildGrid } from "./grid.js";
+import { buildZones, cellIdFor } from "./grid.js";
 import {
   doc, getDoc, setDoc, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
 const qid = new URLSearchParams(location.search).get("q");
 const titleEl = document.getElementById("title");
-const bank = document.getElementById("bank");
-const board = document.getElementById("board");
+const hintEl = document.getElementById("hint");
+const content = document.getElementById("content");
 const sendBtn = document.getElementById("send");
 const stateEl = document.getElementById("state");
+
 function newId() {
   return (self.crypto && crypto.randomUUID)
     ? crypto.randomUUID()
@@ -53,9 +52,10 @@ const clientId = (() => {
   } catch (e) { return newId(); }
 })();
 
-if (!qid) { fail("No question id in the link."); }
+if (!qid) fail("No question id in the link.");
 
-let cells = {};
+let question = null, type = "dragdrop", cells = {};
+let locked = false, syncTimer = null;
 
 (async function init() {
   if (!qid) return;
@@ -64,48 +64,35 @@ let cells = {};
   catch (e) { return fail("Could not load: " + e.message); }
   if (!snap.exists()) return fail("That question doesn't exist.");
 
-  const q = snap.data();
-  titleEl.textContent = q.title || "Question";
+  question = snap.data();
+  type = question.type || "dragdrop";
+  titleEl.textContent = question.title || "Question";
 
-  // statements into the bank, shuffled
-  shuffle(q.statements.slice()).forEach((s) => bank.appendChild(chip(s)));
-
-  const built = buildGrid(q.rows || [], q.cols || []);
-  cells = built.cells;
-  board.appendChild(built.wrapper);
-
-  // make the bank and every cell mutually drag-droppable
-  makeSortable(bank);
-  Object.values(cells).forEach(makeSortable);
+  if (type === "matrix") renderMatrix();
+  else renderDragDrop();
 
   // count this device as joined once (keyed by stable id, refresh-safe)
   setDoc(doc(db, "questions", qid, "joins", clientId), { at: serverTimestamp() }).catch(() => {});
 })();
 
-sendBtn.addEventListener("click", async () => {
-  const answers = currentAnswers();
-  if (Object.keys(answers).length === 0) {
-    stateEl.textContent = "Place at least one statement first.";
-    return;
-  }
-  clearTimeout(syncTimer);
-  sendBtn.disabled = true;
-  stateEl.textContent = "Sending…";
-  try {
-    await setDoc(doc(db, "questions", qid, "responses", clientId),
-      { answers, submitted: true, at: serverTimestamp() });
-    lock();
-  } catch (e) {
-    sendBtn.disabled = false;
-    stateEl.innerHTML = `<span class="flash">Failed: ${e.message}</span>`;
-  }
-});
+/* ---------- drag-and-drop ---------- */
+function renderDragDrop() {
+  hintEl.textContent = "Drag each statement into the right place. A place can hold more than one. Tap Send answer when done.";
+  const bank = document.createElement("div");
+  bank.className = "bank";
+  shuffle(question.statements.slice()).forEach((s) => bank.appendChild(chip(s)));
+  const built = buildZones(question.rows || [], question.cols || []);
+  cells = built.cells;
+  content.appendChild(bank);
+  const spacer = document.createElement("div"); spacer.style.height = "16px"; content.appendChild(spacer);
+  content.appendChild(built.wrapper);
 
+  makeSortable(bank);
+  Object.values(cells).forEach(makeSortable);
+}
 function chip(s) {
   const d = document.createElement("div");
-  d.className = "chip";
-  d.dataset.id = s.id;
-  d.textContent = s.text;
+  d.className = "chip"; d.dataset.id = s.id; d.textContent = s.text;
   return d;
 }
 function makeSortable(el) {
@@ -115,30 +102,89 @@ function makeSortable(el) {
     onStart: () => el.classList.remove("over")
   });
 }
-function onChange() { clear(); syncLive(); }
-function clear() { document.querySelectorAll(".cell.over").forEach((c) => c.classList.remove("over")); }
-
-function currentAnswers() {
+function onChange() {
+  document.querySelectorAll(".cell.over").forEach((c) => c.classList.remove("over"));
+  syncLive();
+}
+function dragAnswers() {
   const answers = {};
   for (const [cellId, el] of Object.entries(cells)) {
     el.querySelectorAll(".chip").forEach((c) => { answers[c.dataset.id] = cellId; });
   }
   return answers;
 }
-let syncTimer = null, locked = false;
+
+/* ---------- matrix (tap to toggle) ---------- */
+function renderMatrix() {
+  hintEl.textContent = "Tap every phase that applies to each activity. An activity can belong to more than one. Tap Send answer when done.";
+  const hasRows = (question.rows || []).length > 0;
+  const hasCols = (question.cols || []).length > 0;
+  (question.rows || []).forEach((r) => {
+    const card = document.createElement("div");
+    card.className = "acard";
+    const t = document.createElement("div");
+    t.className = "atext"; t.textContent = r.label;
+    const toggles = document.createElement("div");
+    toggles.className = "toggles";
+    (question.cols || []).forEach((c) => {
+      const id = cellIdFor(r.id, c.id, hasRows, hasCols);
+      const b = document.createElement("button");
+      b.type = "button"; b.className = "toggle"; b.dataset.cell = id; b.textContent = c.label;
+      b.addEventListener("click", () => {
+        if (locked) return;
+        b.classList.toggle("on");
+        syncLive();
+      });
+      toggles.appendChild(b);
+    });
+    card.appendChild(t); card.appendChild(toggles);
+    content.appendChild(card);
+  });
+}
+function matrixChecks() {
+  const checks = {};
+  document.querySelectorAll(".toggle.on").forEach((b) => { checks[b.dataset.cell] = true; });
+  return checks;
+}
+
+/* ---------- shared: live sync + submit ---------- */
+function payload(submitted) {
+  return type === "matrix"
+    ? { checks: matrixChecks(), submitted, at: serverTimestamp() }
+    : { answers: dragAnswers(), submitted, at: serverTimestamp() };
+}
+function hasAnything() {
+  return type === "matrix"
+    ? Object.keys(matrixChecks()).length > 0
+    : Object.keys(dragAnswers()).length > 0;
+}
 function syncLive() {
   if (locked) return;
   clearTimeout(syncTimer);
   syncTimer = setTimeout(() => {
-    setDoc(doc(db, "questions", qid, "responses", clientId),
-      { answers: currentAnswers(), submitted: false, at: serverTimestamp() }).catch(() => {});
+    setDoc(doc(db, "questions", qid, "responses", clientId), payload(false)).catch(() => {});
   }, 250);
 }
+sendBtn.addEventListener("click", async () => {
+  if (!hasAnything()) { stateEl.textContent = "Make at least one choice first."; return; }
+  clearTimeout(syncTimer);
+  sendBtn.disabled = true;
+  stateEl.textContent = "Sending…";
+  try {
+    await setDoc(doc(db, "questions", qid, "responses", clientId), payload(true));
+    lock();
+  } catch (e) {
+    sendBtn.disabled = false;
+    stateEl.innerHTML = `<span class="flash">Failed: ${e.message}</span>`;
+  }
+});
 function lock() {
   locked = true;
   document.querySelectorAll(".chip").forEach((c) => (c.style.pointerEvents = "none"));
+  document.querySelectorAll(".toggle").forEach((b) => (b.disabled = true));
   stateEl.textContent = "Answer sent — watch the screen.";
 }
+
 function shuffle(a) { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; }
 function fail(m) {
   document.querySelector(".wrap").innerHTML =

@@ -81,9 +81,10 @@ function step(d) {
 function render() {
   if (!question) return;
   phaseEl.textContent = PHASE[view];
+  const matrix = (question.type || "dragdrop") === "matrix";
   if (view === "qr") return renderQR();
-  if (view === "live") return renderLive();
-  return renderResult();
+  if (view === "live") return matrix ? renderLiveMatrix() : renderLive();
+  return matrix ? renderResultMatrix() : renderResult();
 }
 
 function renderQR() {
@@ -183,6 +184,83 @@ function renderResult() {
   stage.innerHTML = "";
   stage.appendChild(banner(`Solution · based on ${pool.length} answer${pool.length === 1 ? "" : "s"}`, "result"));
   stage.appendChild(wrapper);
+}
+
+function renderLiveMatrix() {
+  const tally = cellChecks(responses);
+  const placing = responses.filter((r) => r.checks && Object.keys(r.checks).length > 0).length;
+  const sent = responses.filter((r) => r.submitted).length;
+  const max = Math.max(1, ...Object.values(tally));
+  const { wrapper, cells } = buildGrid(question.rows || [], question.cols || []);
+  for (const [cellId, el] of Object.entries(cells)) {
+    const n = tally[cellId] || 0;
+    if (!n) { el.innerHTML = `<span class="sub" style="margin:0">—</span>`; continue; }
+    el.style.background = `rgba(216,99,46,${(0.12 + 0.6 * (n / max)).toFixed(2)})`;
+    const d = document.createElement("div");
+    d.className = "matnum mono";
+    d.textContent = n;
+    el.appendChild(d);
+  }
+  stage.innerHTML = "";
+  stage.appendChild(banner(`${joins} joined · ${placing} answering · ${sent} sent · live`, "live"));
+  stage.appendChild(scrollWrap(wrapper));
+}
+
+function renderResultMatrix() {
+  const finals = responses.filter((r) => r.submitted);
+  const pool = finals.length ? finals : responses;
+  const total = pool.length || 1;
+  const tally = cellChecks(pool);
+  const correct = new Set(question.correctCells || []);
+  const { wrapper, cells } = buildGrid(question.rows || [], question.cols || []);
+  for (const [cellId, el] of Object.entries(cells)) {
+    const n = tally[cellId] || 0;
+    const pct = Math.round((n / total) * 100);
+    const isCorrect = correct.has(cellId);
+    if (isCorrect) {
+      el.classList.add(pct >= 70 ? "good" : pct >= 40 ? "mid" : "bad");
+      const a = document.createElement("div");
+      a.className = "answer"; a.textContent = "✓";
+      el.appendChild(a);
+      if (pool.length) {
+        const p = document.createElement("div");
+        p.className = "pct mono"; p.textContent = pct + "% ticked";
+        el.appendChild(p);
+      }
+    } else if (pool.length && pct >= 30) {
+      el.classList.add("bad");
+      const p = document.createElement("div");
+      p.className = "pct mono"; p.textContent = pct + "% ticked";
+      el.appendChild(p);
+      const m = document.createElement("div");
+      m.className = "miss"; m.textContent = "not expected";
+      el.appendChild(m);
+    } else if (n) {
+      const s = document.createElement("div");
+      s.className = "matnum mono faint"; s.textContent = n;
+      el.appendChild(s);
+    }
+  }
+  stage.innerHTML = "";
+  stage.appendChild(banner(`Solution · ✓ = expected · based on ${pool.length} answer${pool.length === 1 ? "" : "s"}`, "result"));
+  stage.appendChild(scrollWrap(wrapper));
+}
+
+function scrollWrap(el) {
+  const d = document.createElement("div");
+  d.className = "gridscroll";
+  d.appendChild(el);
+  return d;
+}
+
+// cellId -> count of devices that ticked it
+function cellChecks(list) {
+  const t = {};
+  for (const r of list) {
+    const ch = r.checks || {};
+    for (const cid of Object.keys(ch)) t[cid] = (t[cid] || 0) + 1;
+  }
+  return t;
 }
 
 function banner(text, kind) {
