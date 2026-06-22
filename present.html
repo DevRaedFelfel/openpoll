@@ -8,6 +8,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="styles.css" />
+<script src="qrcode-generator.js"></script>
 </head>
 <body>
 <div class="wrap">
@@ -33,8 +34,6 @@ import { buildGrid } from "./grid.js";
 import {
   doc, getDoc, collection, onSnapshot
 } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
-import * as QRMod from "https://esm.sh/qrcode@1.5.4";
-const QRCode = QRMod.default || QRMod;
 
 const qid = new URLSearchParams(location.search).get("q");
 const VIEWS = ["qr", "live", "result"];
@@ -101,11 +100,16 @@ function renderQR() {
         </div>
       </div>
     </div>`;
-  const c = document.createElement("canvas");
-  document.getElementById("qr").appendChild(c);
-  QRCode.toCanvas(c, url, { width: 300, margin: 1 }, (err) => {
-    if (err) console.error("QR render failed:", err);
-  });
+  try {
+    const qr = qrcode(0, "M");
+    qr.addData(url);
+    qr.make();
+    document.getElementById("qr").innerHTML =
+      qr.createSvgTag({ cellSize: 8, margin: 16, scalable: true });
+  } catch (e) {
+    console.error("QR render failed:", e);
+    document.getElementById("qr").textContent = "QR unavailable — share the link below.";
+  }
 }
 
 function renderLive() {

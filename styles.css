@@ -100,7 +100,7 @@ h1.display { font-size: clamp(28px, 4vw, 44px); margin: 6px 0 4px; font-weight: 
 .bigjoin .num { font-size: clamp(64px, 14vw, 160px); line-height: 1; font-weight: 600; letter-spacing: -.03em; }
 .bigjoin .lbl { color: var(--muted); font-size: 18px; margin-top: 6px; }
 .qr-stage { display: grid; grid-template-columns: auto 1fr; gap: clamp(24px, 5vw, 72px); align-items: center; }
-#qr canvas { border-radius: var(--r); border: 1px solid var(--line); background:#fff; }
+#qr svg, #qr canvas { width: 300px; height: auto; display: block; border-radius: var(--r); border: 1px solid var(--line); background:#fff; }
 .joinurl { font-size: clamp(18px, 2.4vw, 30px); }
 .nav { display: flex; gap: 10px; justify-content: center; margin-top: 28px; }
 .flash { color: var(--bad-ink); }
