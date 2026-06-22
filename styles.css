@@ -359,6 +359,34 @@ h1.display {
 .matnum.faint { color: var(--text-muted); opacity: .6; }
 .cell .answer { line-height: 1; }
 
+/* transposed matrix: phases as rows, activities as numbered columns */
+.matgrid .ghead.row { font-size: clamp(15px, 1.5vw, 20px); }
+.matcolhead {
+  font-family: var(--font-mono); font-feature-settings: "tnum" 1;
+  font-weight: var(--w-bold); font-size: clamp(14px, 1.4vw, 18px);
+  color: var(--text-muted);
+}
+.matcell { min-height: 60px; padding: 8px 6px; align-items: center; text-align: center; gap: 3px; }
+.matcell .answer { font-size: clamp(18px, 2vw, 26px); }
+.matcell .matnum { font-size: clamp(16px, 1.8vw, 24px); }
+.matcell .pct { font-size: clamp(10px, 1vw, 12px); }
+.matcell .miss { font-size: clamp(9px, .9vw, 11px); line-height: 1.1; }
+
+/* numbered legend mapping activity columns -> full text */
+.matlegend {
+  margin-top: 18px;
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 7px 24px;
+}
+.matlegend-item { display: flex; gap: 9px; align-items: baseline; font-size: 13px; color: var(--text-body); line-height: 1.35; }
+.matlegend-num {
+  flex: none; display: inline-flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px; border-radius: var(--radius-sm);
+  background: var(--surface-invert); color: var(--text-invert);
+  font-size: 12px; font-weight: var(--w-semibold);
+  position: relative; top: 3px;
+}
+
 /* ===========================================================================
    How-to banner
    =========================================================================== */

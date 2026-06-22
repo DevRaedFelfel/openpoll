@@ -192,12 +192,63 @@ function renderResult(entering) {
   stage.appendChild(entering ? sweepWrap(wrapper) : wrapper);
 }
 
+// Presenter-only TRANSPOSED matrix layout: phases (cols) become rows, activities
+// (rows) become numbered columns. The stored cellId is unchanged
+// (`${activityId}__${phaseId}`) so tallies / correctCells / the audience page
+// all keep working — only the projector display is flipped.
+function buildMatrixGrid(activities, phases) {
+  const wrapper = document.createElement("div");
+  wrapper.className = "grid matgrid";
+  const cells = {};
+  wrapper.style.gridTemplateColumns =
+    "minmax(120px,auto) " + `repeat(${activities.length}, minmax(54px,1fr))`;
+
+  // header row: empty corner + activity numbers (1..n)
+  wrapper.appendChild(Object.assign(document.createElement("div"), { className: "ghead corner" }));
+  activities.forEach((a, i) => {
+    const h = document.createElement("div");
+    h.className = "ghead col matcolhead";
+    h.textContent = String(i + 1);
+    wrapper.appendChild(h);
+  });
+
+  // one row per phase
+  phases.forEach((p) => {
+    const rh = document.createElement("div");
+    rh.className = "ghead row";
+    rh.textContent = p.label;
+    wrapper.appendChild(rh);
+    activities.forEach((a) => {
+      const id = `${a.id}__${p.id}`;
+      const cell = document.createElement("div");
+      cell.className = "cell matcell";
+      cell.dataset.cell = id;
+      wrapper.appendChild(cell);
+      cells[id] = cell;
+    });
+  });
+  return { wrapper, cells };
+}
+
+// numbered key for the transposed activity columns
+function matrixLegend(activities) {
+  const d = document.createElement("div");
+  d.className = "matlegend";
+  activities.forEach((a, i) => {
+    const item = document.createElement("div");
+    item.className = "matlegend-item";
+    item.innerHTML = `<span class="matlegend-num mono">${i + 1}</span><span>${escapeHtml(a.label)}</span>`;
+    d.appendChild(item);
+  });
+  return d;
+}
+
 function renderLiveMatrix() {
   const tally = cellChecks(responses);
   const placing = responses.filter((r) => r.checks && Object.keys(r.checks).length > 0).length;
   const sent = responses.filter((r) => r.submitted).length;
   const max = Math.max(1, ...Object.values(tally));
-  const { wrapper, cells } = buildGrid(question.rows || [], question.cols || []);
+  const { wrapper, cells } = buildMatrixGrid(question.rows || [], question.cols || []);
   for (const [cellId, el] of Object.entries(cells)) {
     const n = tally[cellId] || 0;
     if (!n) { el.innerHTML = `<span class="sub" style="margin:0">—</span>`; continue; }
@@ -210,6 +261,7 @@ function renderLiveMatrix() {
   stage.innerHTML = "";
   stage.appendChild(banner(`${joins} joined · ${placing} answering · ${sent} sent · live`, "live"));
   stage.appendChild(scrollWrap(wrapper));
+  stage.appendChild(matrixLegend(question.rows || []));
 }
 
 function renderResultMatrix(entering) {
@@ -218,7 +270,7 @@ function renderResultMatrix(entering) {
   const total = pool.length || 1;
   const tally = cellChecks(pool);
   const correct = new Set(question.correctCells || []);
-  const { wrapper, cells } = buildGrid(question.rows || [], question.cols || []);
+  const { wrapper, cells } = buildMatrixGrid(question.rows || [], question.cols || []);
   for (const [cellId, el] of Object.entries(cells)) {
     const n = tally[cellId] || 0;
     const pct = Math.round((n / total) * 100);
@@ -251,6 +303,7 @@ function renderResultMatrix(entering) {
   stage.appendChild(banner(`Solution · ✓ = expected · based on ${pool.length} answer${pool.length === 1 ? "" : "s"}`, "result"));
   // matrix grid scrolls horizontally, so tint cells in place rather than clipping a sweep bar
   stage.appendChild(scrollWrap(wrapper, entering));
+  stage.appendChild(matrixLegend(question.rows || []));
 }
 
 function scrollWrap(el, reveal) {
