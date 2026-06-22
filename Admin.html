@@ -20,7 +20,7 @@
     <button id="load">Load real questions (Q1, Q2, Q3)</button>
   </div>
 
-  <pre id="log" class="mono" style="background:#fff; border:1px solid var(--line); border-radius:var(--r); padding:14px; white-space:pre-wrap; min-height:120px; font-size:13px;"></pre>
+  <pre id="log" class="mono adminlog"></pre>
 </div>
 
 <script type="module">
@@ -66,7 +66,7 @@ document.getElementById("load").addEventListener("click", async () => {
 });
 
 const QUESTIONS = {
-  sectors: {
+  "1": {
     title: "Education — links with other sectors",
     type: "dragdrop",
     rows: [{ id: "edu", label: "Education" }],
@@ -112,7 +112,7 @@ const QUESTIONS = {
     }
   },
 
-  nexus: {
+  "2": {
     title: "Triple Nexus in Gaza",
     type: "dragdrop",
     rows: [],
@@ -139,7 +139,7 @@ const QUESTIONS = {
     }
   },
 
-  phases: {
+  "3": {
     title: "EiE activities across DRR phases",
     type: "matrix",
     rows: [
