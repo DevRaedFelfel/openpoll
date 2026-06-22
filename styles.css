@@ -234,12 +234,17 @@ h1.display {
 }
 .cell.over { border-color: var(--accent); background: var(--accent-soft); }
 
-/* consensus tallies (projector live) */
+/* consensus tallies (projector live) — each activity is its own band,
+   zebra-striped odd/even so stacked activities are easy to tell apart:
+   accent-tinted on odd rows, the neutral paper "space" tone on even. */
 .tally {
   display: flex; align-items: center; justify-content: space-between; gap: 10px;
   font-family: var(--font-body);
   font-size: clamp(15px, 1.6vw, 21px); color: var(--text-strong);
+  padding: 6px 10px; border-radius: var(--radius-sm);
 }
+.cell .tally:nth-of-type(odd)  { background: var(--accent-soft); }
+.cell .tally:nth-of-type(even) { background: var(--surface-sunk); }
 .tally .n { font-family: var(--font-mono); font-feature-settings: "tnum" 1; color: var(--text-muted); font-size: .8em; }
 .tally.top { font-weight: var(--w-semibold); }
 
