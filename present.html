@@ -95,6 +95,7 @@ function renderQR() {
       <div>
         <p class="eyebrow" style="color:var(--muted)">Scan to join</p>
         <p class="joinurl mono"><a href="${url}">${url.replace(/^https?:\/\//, "")}</a></p>
+        <p class="sub" style="margin:8px 0 0;">No camera? Open <span class="mono">…/play.html</span> and enter code <span class="codechip mono">${qid}</span></p>
         <div class="bigjoin" style="text-align:left; margin-top:18px;">
           <div class="num display">${joins}</div>
           <div class="lbl">joined</div>

@@ -2,19 +2,18 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>OpenPoll — answer</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="styles.css" />
-<script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
 </head>
 <body>
 <div class="wrap">
   <div class="eyebrow">OpenPoll</div>
   <h1 class="display" id="title">…</h1>
-  <p class="sub" id="hint"></p>
+  <div id="how" class="how"></div>
 
   <div id="content"></div>
 
@@ -26,14 +25,15 @@
 
 <script type="module">
 import { db } from "./firebase.js";
-import { buildZones, cellIdFor } from "./grid.js";
+import { buildGrid, buildZones, cellIdFor } from "./grid.js";
 import {
   doc, getDoc, setDoc, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
+const WIDE = 760;
 const qid = new URLSearchParams(location.search).get("q");
 const titleEl = document.getElementById("title");
-const hintEl = document.getElementById("hint");
+const howEl = document.getElementById("how");
 const content = document.getElementById("content");
 const sendBtn = document.getElementById("send");
 const stateEl = document.getElementById("state");
@@ -45,78 +45,123 @@ function newId() {
 }
 const clientId = (() => {
   const KEY = "openpoll_device";
-  try {
-    let id = localStorage.getItem(KEY);
-    if (!id) { id = newId(); localStorage.setItem(KEY, id); }
-    return id;
-  } catch (e) { return newId(); }
+  try { let id = localStorage.getItem(KEY); if (!id) { id = newId(); localStorage.setItem(KEY, id); } return id; }
+  catch (e) { return newId(); }
 })();
 
-if (!qid) fail("No question id in the link.");
+let question = null, type = "dragdrop", locked = false, syncTimer = null;
+let placement = {};      // dragdrop: statementId -> cellId
+let selected = null;     // dragdrop: statement "in hand"
+let wide = innerWidth >= WIDE;
 
-let question = null, type = "dragdrop", cells = {};
-let locked = false, syncTimer = null;
+if (!qid) { renderCodeEntry(); }
+else { init(); }
 
-(async function init() {
-  if (!qid) return;
+async function init() {
   let snap;
   try { snap = await getDoc(doc(db, "questions", qid)); }
   catch (e) { return fail("Could not load: " + e.message); }
-  if (!snap.exists()) return fail("That question doesn't exist.");
-
+  if (!snap.exists()) return fail("No question with code “" + qid + "”.");
   question = snap.data();
   type = question.type || "dragdrop";
   titleEl.textContent = question.title || "Question";
 
-  if (type === "matrix") renderMatrix();
-  else renderDragDrop();
-
-  // count this device as joined once (keyed by stable id, refresh-safe)
-  setDoc(doc(db, "questions", qid, "joins", clientId), { at: serverTimestamp() }).catch(() => {});
-})();
-
-/* ---------- drag-and-drop ---------- */
-function renderDragDrop() {
-  hintEl.textContent = "Drag each statement into the right place. A place can hold more than one. Tap Send answer when done.";
-  const bank = document.createElement("div");
-  bank.className = "bank";
-  shuffle(question.statements.slice()).forEach((s) => bank.appendChild(chip(s)));
-  const built = buildZones(question.rows || [], question.cols || []);
-  cells = built.cells;
-  content.appendChild(bank);
-  const spacer = document.createElement("div"); spacer.style.height = "16px"; content.appendChild(spacer);
-  content.appendChild(built.wrapper);
-
-  makeSortable(bank);
-  Object.values(cells).forEach(makeSortable);
-}
-function chip(s) {
-  const d = document.createElement("div");
-  d.className = "chip"; d.dataset.id = s.id; d.textContent = s.text;
-  return d;
-}
-function makeSortable(el) {
-  Sortable.create(el, {
-    group: "pool", animation: 150, draggable: ".chip",
-    onAdd: onChange, onRemove: onChange, onUpdate: onChange, onEnd: onChange,
-    onStart: () => el.classList.remove("over")
-  });
-}
-function onChange() {
-  document.querySelectorAll(".cell.over").forEach((c) => c.classList.remove("over"));
-  syncLive();
-}
-function dragAnswers() {
-  const answers = {};
-  for (const [cellId, el] of Object.entries(cells)) {
-    el.querySelectorAll(".chip").forEach((c) => { answers[c.dataset.id] = cellId; });
+  if (type === "matrix") {
+    howEl.innerHTML = `<b>How to answer:</b> tap every phase that applies to each activity. An activity can have more than one. Tap again to remove. Then tap <b>Send answer</b>.`;
+    renderMatrix();
+  } else {
+    howEl.innerHTML = `<b>How to answer:</b> tap an activity, then tap the box where it belongs. Tap a placed activity to move it. Then tap <b>Send answer</b>.`;
+    renderDD();
+    addEventListener("resize", () => {
+      const w = innerWidth >= WIDE;
+      if (w !== wide) { wide = w; renderDD(); }
+    });
   }
-  return answers;
+  setDoc(doc(db, "questions", qid, "joins", clientId), { at: serverTimestamp() }).catch(() => {});
 }
 
-/* ---------- matrix (tap to toggle) ---------- */
+/* ---------- code entry (typed by hand) ---------- */
+function renderCodeEntry() {
+  titleEl.textContent = "Join a question";
+  howEl.textContent = "Enter the code shown on screen.";
+  content.innerHTML = `
+    <div class="codebox">
+      <input id="code" inputmode="text" autocapitalize="off" autocomplete="off" placeholder="code" />
+      <button id="go">Go</button>
+    </div>`;
+  const input = document.getElementById("code");
+  const go = () => { const v = input.value.trim(); if (v) location.search = "?q=" + encodeURIComponent(v); };
+  document.getElementById("go").addEventListener("click", go);
+  input.addEventListener("keydown", (e) => { if (e.key === "Enter") go(); });
+  input.focus();
+  sendBtn.style.display = "none";
+}
+
+/* ---------- drag-replacement: tap to place ---------- */
+function targets() {
+  return wide ? buildGrid(question.rows || [], question.cols || [])
+              : buildZones(question.rows || [], question.cols || []);
+}
+function renderDD() {
+  content.innerHTML = "";
+  const txt = {}; question.statements.forEach((s) => (txt[s.id] = s.text));
+  const unplaced = question.statements.filter((s) => !(s.id in placement));
+
+  // bank (collapses while a statement is selected)
+  const bank = document.createElement("div");
+  bank.className = "bank2";
+  if (selected) {
+    const bar = document.createElement("div");
+    bar.className = "placing";
+    bar.innerHTML = `<span><i>Placing:</i> ${escapeHtml(txt[selected])}</span>`;
+    const cancel = document.createElement("button");
+    cancel.className = "mini"; cancel.textContent = "Cancel";
+    cancel.addEventListener("click", () => { selected = null; renderDD(); });
+    bar.appendChild(cancel);
+    bank.appendChild(bar);
+  } else {
+    const head = document.createElement("div");
+    head.className = "bankhead";
+    head.textContent = unplaced.length ? `Tap an activity (${unplaced.length} left)` : "All placed — review, or tap any to move";
+    bank.appendChild(head);
+    if (unplaced.length) {
+      const list = document.createElement("div");
+      list.className = "sbtns";
+      unplaced.forEach((s) => {
+        const b = document.createElement("button");
+        b.className = "sbtn"; b.textContent = s.text;
+        b.addEventListener("click", () => { if (locked) return; selected = s.id; renderDD(); });
+        list.appendChild(b);
+      });
+      bank.appendChild(list);
+    }
+  }
+  content.appendChild(bank);
+
+  // targets
+  const { wrapper, cells } = targets();
+  for (const [cellId, el] of Object.entries(cells)) {
+    if (selected) el.classList.add("armed");
+    el.addEventListener("click", () => {
+      if (locked || !selected) return;
+      placement[selected] = cellId; selected = null; renderDD(); syncLive();
+    });
+    Object.keys(placement).filter((sid) => placement[sid] === cellId).forEach((sid) => {
+      const p = document.createElement("button");
+      p.className = "pchip"; p.textContent = txt[sid];
+      p.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        if (locked) return;
+        delete placement[sid]; selected = sid; renderDD();
+      });
+      el.appendChild(p);
+    });
+  }
+  content.appendChild(wrapper);
+}
+
+/* ---------- matrix: tap to toggle ---------- */
 function renderMatrix() {
-  hintEl.textContent = "Tap every phase that applies to each activity. An activity can belong to more than one. Tap Send answer when done.";
   const hasRows = (question.rows || []).length > 0;
   const hasCols = (question.cols || []).length > 0;
   (question.rows || []).forEach((r) => {
@@ -130,11 +175,7 @@ function renderMatrix() {
       const id = cellIdFor(r.id, c.id, hasRows, hasCols);
       const b = document.createElement("button");
       b.type = "button"; b.className = "toggle"; b.dataset.cell = id; b.textContent = c.label;
-      b.addEventListener("click", () => {
-        if (locked) return;
-        b.classList.toggle("on");
-        syncLive();
-      });
+      b.addEventListener("click", () => { if (locked) return; b.classList.toggle("on"); syncLive(); });
       toggles.appendChild(b);
     });
     card.appendChild(t); card.appendChild(toggles);
@@ -147,16 +188,14 @@ function matrixChecks() {
   return checks;
 }
 
-/* ---------- shared: live sync + submit ---------- */
+/* ---------- shared ---------- */
 function payload(submitted) {
   return type === "matrix"
     ? { checks: matrixChecks(), submitted, at: serverTimestamp() }
-    : { answers: dragAnswers(), submitted, at: serverTimestamp() };
+    : { answers: { ...placement }, submitted, at: serverTimestamp() };
 }
 function hasAnything() {
-  return type === "matrix"
-    ? Object.keys(matrixChecks()).length > 0
-    : Object.keys(dragAnswers()).length > 0;
+  return type === "matrix" ? Object.keys(matrixChecks()).length > 0 : Object.keys(placement).length > 0;
 }
 function syncLive() {
   if (locked) return;
@@ -168,24 +207,21 @@ function syncLive() {
 sendBtn.addEventListener("click", async () => {
   if (!hasAnything()) { stateEl.textContent = "Make at least one choice first."; return; }
   clearTimeout(syncTimer);
-  sendBtn.disabled = true;
-  stateEl.textContent = "Sending…";
+  sendBtn.disabled = true; stateEl.textContent = "Sending…";
   try {
     await setDoc(doc(db, "questions", qid, "responses", clientId), payload(true));
-    lock();
+    locked = true;
+    document.querySelectorAll(".toggle, .sbtn, .pchip, .mini").forEach((b) => (b.disabled = true));
+    stateEl.textContent = "Answer sent — watch the screen.";
   } catch (e) {
     sendBtn.disabled = false;
     stateEl.innerHTML = `<span class="flash">Failed: ${e.message}</span>`;
   }
 });
-function lock() {
-  locked = true;
-  document.querySelectorAll(".chip").forEach((c) => (c.style.pointerEvents = "none"));
-  document.querySelectorAll(".toggle").forEach((b) => (b.disabled = true));
-  stateEl.textContent = "Answer sent — watch the screen.";
-}
 
-function shuffle(a) { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; }
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
 function fail(m) {
   document.querySelector(".wrap").innerHTML =
     `<div class="eyebrow">OpenPoll</div><h1 class="display">Hmm.</h1><p class="sub">${m}</p>`;
