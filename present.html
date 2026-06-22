@@ -8,7 +8,6 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="styles.css" />
-<script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.4/build/qrcode.min.js"></script>
 </head>
 <body>
 <div class="wrap">
@@ -34,6 +33,8 @@ import { buildGrid } from "./grid.js";
 import {
   doc, getDoc, collection, onSnapshot
 } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+import * as QRMod from "https://esm.sh/qrcode@1.5.4";
+const QRCode = QRMod.default || QRMod;
 
 const qid = new URLSearchParams(location.search).get("q");
 const VIEWS = ["qr", "live", "result"];
@@ -102,12 +103,16 @@ function renderQR() {
     </div>`;
   const c = document.createElement("canvas");
   document.getElementById("qr").appendChild(c);
-  if (window.QRCode) QRCode.toCanvas(c, url, { width: 300, margin: 1 });
+  QRCode.toCanvas(c, url, { width: 300, margin: 1 }, (err) => {
+    if (err) console.error("QR render failed:", err);
+  });
 }
 
 function renderLive() {
-  const tally = cellTally();
+  const tally = cellTally(responses);
   const txt = stmtText();
+  const placing = responses.filter((r) => r.answers && Object.keys(r.answers).length > 0).length;
+  const sent = responses.filter((r) => r.submitted).length;
   const { wrapper, cells } = buildGrid(question.rows || [], question.cols || []);
   for (const [cellId, el] of Object.entries(cells)) {
     const counts = tally[cellId] || {};
@@ -121,14 +126,16 @@ function renderLive() {
     });
   }
   stage.innerHTML = "";
-  stage.appendChild(banner(`${joins} joined · ${responses.length} submitted · live`, "live"));
+  stage.appendChild(banner(`${joins} joined · ${placing} placing · ${sent} sent · live`, "live"));
   stage.appendChild(wrapper);
 }
 
 function renderResult() {
-  const tally = cellTally();
+  const finals = responses.filter((r) => r.submitted);
+  const pool = finals.length ? finals : responses;
+  const tally = cellTally(pool);
   const txt = stmtText();
-  const total = responses.length || 1;
+  const total = pool.length || 1;
   // reverse the correct map: cellId -> [statementId]
   const correctByCell = {};
   for (const [sid, cid] of Object.entries(question.correct || {})) {
@@ -151,7 +158,7 @@ function renderResult() {
     ans.textContent = correctIds.map((s) => txt[s] || s).join(", ") || "—";
     el.appendChild(ans);
 
-    if (responses.length) {
+    if (pool.length) {
       const p = document.createElement("div");
       p.className = "pct mono";
       p.textContent = pct + "% correct";
@@ -170,7 +177,7 @@ function renderResult() {
     }
   }
   stage.innerHTML = "";
-  stage.appendChild(banner(`Solution · based on ${responses.length} answers`, "result"));
+  stage.appendChild(banner(`Solution · based on ${pool.length} answer${pool.length === 1 ? "" : "s"}`, "result"));
   stage.appendChild(wrapper);
 }
 
@@ -182,9 +189,9 @@ function banner(text, kind) {
 }
 
 // cellId -> { statementId: count }
-function cellTally() {
+function cellTally(list) {
   const t = {};
-  for (const r of responses) {
+  for (const r of list) {
     const a = r.answers || {};
     for (const [sid, cid] of Object.entries(a)) {
       (t[cid] = t[cid] || {});

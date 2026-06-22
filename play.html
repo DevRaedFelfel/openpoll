@@ -30,7 +30,7 @@
 import { db } from "./firebase.js";
 import { buildGrid } from "./grid.js";
 import {
-  doc, getDoc, collection, addDoc, serverTimestamp
+  doc, getDoc, setDoc, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
 const qid = new URLSearchParams(location.search).get("q");
@@ -39,6 +39,19 @@ const bank = document.getElementById("bank");
 const board = document.getElementById("board");
 const sendBtn = document.getElementById("send");
 const stateEl = document.getElementById("state");
+function newId() {
+  return (self.crypto && crypto.randomUUID)
+    ? crypto.randomUUID()
+    : "c" + Math.random().toString(36).slice(2) + Date.now().toString(36);
+}
+const clientId = (() => {
+  const KEY = "openpoll_device";
+  try {
+    let id = localStorage.getItem(KEY);
+    if (!id) { id = newId(); localStorage.setItem(KEY, id); }
+    return id;
+  } catch (e) { return newId(); }
+})();
 
 if (!qid) { fail("No question id in the link."); }
 
@@ -65,24 +78,22 @@ let cells = {};
   makeSortable(bank);
   Object.values(cells).forEach(makeSortable);
 
-  // count a join (best effort, non-blocking)
-  addDoc(collection(db, "questions", qid, "joins"), { at: serverTimestamp() }).catch(() => {});
+  // count this device as joined once (keyed by stable id, refresh-safe)
+  setDoc(doc(db, "questions", qid, "joins", clientId), { at: serverTimestamp() }).catch(() => {});
 })();
 
 sendBtn.addEventListener("click", async () => {
-  const answers = {};
-  for (const [cellId, el] of Object.entries(cells)) {
-    el.querySelectorAll(".chip").forEach((c) => { answers[c.dataset.id] = cellId; });
-  }
+  const answers = currentAnswers();
   if (Object.keys(answers).length === 0) {
     stateEl.textContent = "Place at least one statement first.";
     return;
   }
+  clearTimeout(syncTimer);
   sendBtn.disabled = true;
   stateEl.textContent = "Sending…";
   try {
-    await addDoc(collection(db, "questions", qid, "responses"),
-      { answers, at: serverTimestamp() });
+    await setDoc(doc(db, "questions", qid, "responses", clientId),
+      { answers, submitted: true, at: serverTimestamp() });
     lock();
   } catch (e) {
     sendBtn.disabled = false;
@@ -100,12 +111,31 @@ function chip(s) {
 function makeSortable(el) {
   Sortable.create(el, {
     group: "pool", animation: 150, draggable: ".chip",
-    onAdd: clear, onRemove: clear,
+    onAdd: onChange, onRemove: onChange, onUpdate: onChange, onEnd: onChange,
     onStart: () => el.classList.remove("over")
   });
 }
+function onChange() { clear(); syncLive(); }
 function clear() { document.querySelectorAll(".cell.over").forEach((c) => c.classList.remove("over")); }
+
+function currentAnswers() {
+  const answers = {};
+  for (const [cellId, el] of Object.entries(cells)) {
+    el.querySelectorAll(".chip").forEach((c) => { answers[c.dataset.id] = cellId; });
+  }
+  return answers;
+}
+let syncTimer = null, locked = false;
+function syncLive() {
+  if (locked) return;
+  clearTimeout(syncTimer);
+  syncTimer = setTimeout(() => {
+    setDoc(doc(db, "questions", qid, "responses", clientId),
+      { answers: currentAnswers(), submitted: false, at: serverTimestamp() }).catch(() => {});
+  }, 250);
+}
 function lock() {
+  locked = true;
   document.querySelectorAll(".chip").forEach((c) => (c.style.pointerEvents = "none"));
   stateEl.textContent = "Answer sent — watch the screen.";
 }
