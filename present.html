@@ -6,7 +6,7 @@
 <title>OpenPoll — present</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="styles.css" />
 <script src="qrcode-generator.js"></script>
 </head>
@@ -78,20 +78,25 @@ function step(d) {
   render();
 }
 
+let renderedView = null;
 function render() {
   if (!question) return;
+  // `entering` is true only when we advance to a new view, not on a live data
+  // refresh — so decorative entrances (QR pop, solution sweep) play once.
+  const entering = view !== renderedView;
+  renderedView = view;
   phaseEl.textContent = PHASE[view];
   const matrix = (question.type || "dragdrop") === "matrix";
-  if (view === "qr") return renderQR();
+  if (view === "qr") return renderQR(entering);
   if (view === "live") return matrix ? renderLiveMatrix() : renderLive();
-  return matrix ? renderResultMatrix() : renderResult();
+  return matrix ? renderResultMatrix(entering) : renderResult(entering);
 }
 
-function renderQR() {
+function renderQR(entering) {
   const url = new URL("play.html?q=" + qid, location.href).href;
   stage.innerHTML = `
     <div class="qr-stage">
-      <div id="qr"></div>
+      <div id="qr"${entering ? ' class="pop"' : ""}></div>
       <div>
         <p class="eyebrow" style="color:var(--muted)">Scan to join</p>
         <p class="joinurl mono"><a href="${url}">${url.replace(/^https?:\/\//, "")}</a></p>
@@ -136,7 +141,7 @@ function renderLive() {
   stage.appendChild(wrapper);
 }
 
-function renderResult() {
+function renderResult(entering) {
   const finals = responses.filter((r) => r.submitted);
   const pool = finals.length ? finals : responses;
   const tally = cellTally(pool);
@@ -184,7 +189,7 @@ function renderResult() {
   }
   stage.innerHTML = "";
   stage.appendChild(banner(`Solution · based on ${pool.length} answer${pool.length === 1 ? "" : "s"}`, "result"));
-  stage.appendChild(wrapper);
+  stage.appendChild(entering ? sweepWrap(wrapper) : wrapper);
 }
 
 function renderLiveMatrix() {
@@ -207,7 +212,7 @@ function renderLiveMatrix() {
   stage.appendChild(scrollWrap(wrapper));
 }
 
-function renderResultMatrix() {
+function renderResultMatrix(entering) {
   const finals = responses.filter((r) => r.submitted);
   const pool = finals.length ? finals : responses;
   const total = pool.length || 1;
@@ -244,12 +249,13 @@ function renderResultMatrix() {
   }
   stage.innerHTML = "";
   stage.appendChild(banner(`Solution · ✓ = expected · based on ${pool.length} answer${pool.length === 1 ? "" : "s"}`, "result"));
-  stage.appendChild(scrollWrap(wrapper));
+  // matrix grid scrolls horizontally, so tint cells in place rather than clipping a sweep bar
+  stage.appendChild(scrollWrap(wrapper, entering));
 }
 
-function scrollWrap(el) {
+function scrollWrap(el, reveal) {
   const d = document.createElement("div");
-  d.className = "gridscroll";
+  d.className = "gridscroll" + (reveal ? " revealing" : "");
   d.appendChild(el);
   return d;
 }
@@ -266,9 +272,31 @@ function cellChecks(list) {
 
 function banner(text, kind) {
   const d = document.createElement("div");
-  d.className = "bar";
-  d.innerHTML = `<div class="counter"><span class="big mono">${text}</span></div>`;
+  d.className = "bar statusbar";
+  const span = document.createElement("span");
+  span.className = "statusbanner " + (kind === "live" ? "live" : "result");
+  if (kind === "live") {
+    const dot = document.createElement("span");
+    dot.className = "dot";
+    span.appendChild(dot);
+  }
+  const t = document.createElement("span");
+  t.className = "big mono";
+  t.textContent = text;
+  span.appendChild(t);
+  d.appendChild(span);
   return d;
+}
+
+// Wrap a result grid so the solution sweeps left→right, tinting cells in its wake.
+function sweepWrap(el) {
+  const w = document.createElement("div");
+  w.className = "gridwrap revealing";
+  const s = document.createElement("div");
+  s.className = "sweep";
+  w.appendChild(s);
+  w.appendChild(el);
+  return w;
 }
 
 // cellId -> { statementId: count }
